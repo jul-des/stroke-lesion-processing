@@ -24,7 +24,7 @@ def cleanup_deepisles_output(output_dir, sub_id):
 
 def save_metrics(metrics, output_dir, sub_id, center=None):
 
-    metrics_path = os.path.join(output_dir, "qc_metrics_external.csv")
+    metrics_path = os.path.join(output_dir, "qc_metrics.csv")
     if os.path.exists(metrics_path):
         qc_metrics = pd.read_csv(metrics_path).to_dict(orient="list")
     else:

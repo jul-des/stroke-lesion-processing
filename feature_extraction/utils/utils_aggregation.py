@@ -29,6 +29,7 @@ def aggregate_lesion_features(
     mean_columns: list[str],
     mean_sd_columns: list[str],
     patient_col: str = "Patient ID",
+    total_volume_col: str = "Total Lesion Volume",
 ) -> pd.DataFrame:
     """
     Aggregate per-lesion rows into one row per patient with a rich feature set.
@@ -44,6 +45,11 @@ def aggregate_lesion_features(
         <col>_mean and <col>_sd).
     patient_col : str
         Column containing patient identifiers.
+    total_volume_col : str
+        Column holding the total lesion volume for each lesion row. If this
+        value is missing (NaN) for ANY lesion belonging to a patient, every
+        aggregated feature for that patient is set to NaN (only `patient_col`
+        is preserved).
 
     Returns
     -------
@@ -56,6 +62,9 @@ def aggregate_lesion_features(
     for patient_id, grp in df.groupby(patient_col):
         row = {patient_col: patient_id}
         n   = len(grp)
+
+        # ── Guard: any missing total lesion volume invalidates the patient ────
+        has_missing_total_volume = grp[total_volume_col].isna().any()
 
         # ── Basic flag ────────────────────────────────────────────────────────
         row["is_single_lesion"] = int(n == 1)
@@ -127,15 +136,17 @@ def aggregate_lesion_features(
             return (2 * np.sum((np.arange(1, n_t + 1)) * arr_s)
                     / (n_t * arr_s.sum()) - (n_t + 1) / n_t)
 
-
         # Hemisphere & circulation flags
         row["bilateral"]                  = int(bool(territories_present & LEFT)
                                                 and bool(territories_present & RIGHT))
         row["anterior_and_posterior"]     = int(bool(territories_present & ANTERIOR)
                                                 and bool(territories_present & POSTERIOR))
 
+        # ── Invalidate the row if any lesion is missing total lesion volume ────
+        if has_missing_total_volume:
+            row = {k: (v if k == patient_col else np.nan) for k, v in row.items()}
+
         records.append(row)
 
     result = pd.DataFrame(records).set_index(patient_col)
     return result
-
