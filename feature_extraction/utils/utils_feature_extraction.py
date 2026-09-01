@@ -141,14 +141,13 @@ def load_label_dict_xml(xml_path, include_background=True):
 def extract_lesion_shape_features(
     lesion_mask: np.ndarray,
     spacing: Optional[tuple] = None,
+    target_spacing: Optional[tuple] = (2.0,2.0,2.0), #set to None to skip resampling
     reference_image: Optional[np.ndarray] = None,
     params: Optional[Dict] = None
 ) -> pd.DataFrame:
-
-
     mask_sitk = sitk.GetImageFromArray(lesion_mask.astype(np.int32))
     
-    # Set voxel spacing
+    # Set voxel spacing (native acquisition spacing)
     if spacing is not None:
         # Take only first 3 elements (in case of 4D with time dimension)
         # SimpleITK uses (x, y, z) ordering, reverse the input (z, y, x)
@@ -158,6 +157,22 @@ def extract_lesion_shape_features(
     else:
         mask_sitk.SetSpacing([1.0, 1.0, 1.0])
     
+    if target_spacing is not None:
+        target_spacing_3d = [float(s) for s in target_spacing[:3]][::-1]
+    else:
+        target_spacing_3d = None
+    
+    # Decide once (spacing is constant across the whole image, so this
+    # doesn't need to be re-evaluated per lesion): skip resampling entirely
+    # if native spacing already matches target within +/-0.1mm on every
+    # axis. Avoids unnecessary interpolation (and its associated smoothing)
+    # when the image is already effectively at the target resolution.
+    needs_resampling = False
+    if target_spacing_3d is not None:
+        native_spacing_arr = np.array(mask_sitk.GetSpacing())
+        target_spacing_arr = np.array(target_spacing_3d)
+        needs_resampling = not np.all(np.abs(native_spacing_arr - target_spacing_arr) <= 0.1) #only resample if not yet target spacing with 0.1 tolerance
+    
     # Get unique lesion labels (excluding background=0)
     unique_labels = np.unique(lesion_mask)
     unique_labels = unique_labels[unique_labels != 0]  # Remove background
@@ -165,53 +180,99 @@ def extract_lesion_shape_features(
     if len(unique_labels) == 0:
         raise ValueError("No lesions found in mask (only background=0 detected)")
     
+    nan_features = {
+        'MeshVolume': np.nan,
+        'SurfaceArea': np.nan,
+        'SurfaceVolumeRatio': np.nan,
+        'Sphericity': np.nan,
+        'Maximum3DDiameter': np.nan,
+        'Maximum2DDiameterSlice': np.nan,
+        'Maximum2DDiameterColumn': np.nan,
+        'Maximum2DDiameterRow': np.nan,
+        'MajorAxisLength': np.nan,
+        'MinorAxisLength': np.nan,
+        'LeastAxisLength': np.nan,
+        'Elongation': np.nan,
+        'Flatness': np.nan
+    }
     
     # Extract features for each lesion
     all_features = []
     
     for label in unique_labels:
-        # Check lesion size
-        lesion_voxels = np.sum(lesion_mask == label)
-        
-        # Get lesion bounding box to check dimensionality
-        lesion_coords = np.argwhere(lesion_mask == label)
-        bbox_size = lesion_coords.max(axis=0) - lesion_coords.min(axis=0) + 1
-        num_dimensions = np.sum(bbox_size > 1)  # How many axes have extent > 1
-        voxel_volume = np.prod(mask_sitk.GetSpacing())
-        total_volume = voxel_volume * lesion_voxels
-        
-        if lesion_voxels == 1 or num_dimensions < 2:
-            # Handle single-voxel or 1D lesions (can't compute meaningful 3D shape features)
-
-            
-            shape_features = {
-                'N voxels': int(lesion_voxels),
-                'MeshVolume': np.nan,
-                'SurfaceArea': np.nan,
-                'SurfaceVolumeRatio': np.nan,
-                'Sphericity': np.nan,
-                'Maximum3DDiameter': np.nan,
-                'Maximum2DDiameterSlice': np.nan,
-                'Maximum2DDiameterColumn': np.nan,
-                'Maximum2DDiameterRow': np.nan,
-                'MajorAxisLength': np.nan,
-                'MinorAxisLength': np.nan,
-                'LeastAxisLength': np.nan,
-                'Elongation': np.nan,
-                'Flatness': np.nan
-            }
-            
-            all_features.append(shape_features)
-            continue
-        
-        # Create binary mask for current lesion
-        binary_mask = sitk.BinaryThreshold(
+        # Create binary mask for current lesion at NATIVE resolution first
+        native_binary_mask = sitk.BinaryThreshold(
             mask_sitk,
             lowerThreshold=int(label),
             upperThreshold=int(label),
             insideValue=1,
             outsideValue=0
         )
+        
+
+        if needs_resampling:
+            original_spacing = native_binary_mask.GetSpacing()
+            original_size = native_binary_mask.GetSize()
+            
+            new_size = [
+                int(round(osz * ospc / tspc))
+                for osz, ospc, tspc in zip(original_size, original_spacing, target_spacing_3d)
+            ]
+            
+            resampler = sitk.ResampleImageFilter()
+            resampler.SetOutputSpacing(target_spacing_3d)
+            resampler.SetSize(new_size)
+            resampler.SetOutputOrigin(native_binary_mask.GetOrigin())
+            resampler.SetOutputDirection(native_binary_mask.GetDirection())
+            resampler.SetInterpolator(sitk.sitkNearestNeighbor)
+            resampler.SetDefaultPixelValue(0.0)
+            resampler.SetTransform(sitk.Transform())
+            resampler.SetOutputPixelType(sitk.sitkFloat32)
+            
+            # Cast to float so linear interpolation produces genuine
+            # intermediate values (0-1) rather than being rounded to {0,1}
+            # by an integer pixel type before interpolation happens.
+            float_mask = sitk.Cast(native_binary_mask, sitk.sitkFloat32)
+            resampled_float = resampler.Execute(float_mask)
+            
+            # Re-binarize at 0.5
+            binary_mask = sitk.BinaryThreshold(
+                resampled_float,
+                lowerThreshold=0.5,
+                upperThreshold=1e9,
+                insideValue=1,
+                outsideValue=0
+            )
+        else:
+            binary_mask = native_binary_mask
+        
+        # From here on, everything (voxel counts, bbox, spacing) reflects
+        # the resampled (or native, if no resampling was needed) grid.
+        binary_arr = sitk.GetArrayFromImage(binary_mask) == 1
+        lesion_voxels = int(np.sum(binary_arr))
+        
+        if lesion_voxels == 0:
+            # Lesion vanished after resampling (can happen for very small
+            # lesions being downsampled to a coarser grid) -- report as NA
+            # rather than skipping, so every input label yields a row.
+            shape_features = dict(nan_features)
+            shape_features['N voxels'] = 0
+            all_features.append(shape_features)
+            continue
+        
+        # Get lesion bounding box to check dimensionality
+        lesion_coords = np.argwhere(binary_arr)
+        bbox_size = lesion_coords.max(axis=0) - lesion_coords.min(axis=0) + 1
+        num_dimensions = np.sum(bbox_size > 1)  # How many axes have extent > 1
+        voxel_volume = np.prod(binary_mask.GetSpacing())
+        total_volume = voxel_volume * lesion_voxels
+        
+        if lesion_voxels == 1 or num_dimensions < 2:
+            # Handle single-voxel or 1D lesions (can't compute meaningful 3D shape features)
+            shape_features = dict(nan_features)
+            shape_features['N voxels'] = int(lesion_voxels)
+            all_features.append(shape_features)
+            continue
         
         # Extract features
         try:
@@ -221,34 +282,19 @@ def extract_lesion_shape_features(
             
         except Exception as e:
             print(f"Warning: Could not extract features for lesion {label} ({lesion_voxels} voxels): {str(e)}")
+            shape_features = dict(nan_features)
+            shape_features['N voxels'] = int(lesion_voxels)
+            all_features.append(shape_features)
             continue
     
-    # Create DataFrame
-    if not all_features:
-        raise ValueError("No features could be extracted from any lesion")
-    
+    # Build DataFrame. Every label in unique_labels contributes exactly one
+    # row (real features or NA), so all_features is only empty if
+    # unique_labels was empty -- already handled above. No error is raised
+    # here; if every lesion ended up NA, the returned DataFrame is simply
+    # all-NA rows.
     features_df = pd.DataFrame(all_features)
-
     
     return features_df
-
-
-def get_available_shape_features() -> List[str]:
-    """
-    Get list of available shape features in PyRadiomics.
-    
-    Returns:
-    --------
-    list
-        List of shape feature names
-    """
-    feature_names = [
-        'VoxelVolume', 'MeshVolume', 'SurfaceArea', 'SurfaceVolumeRatio',
-        'Sphericity', 'Maximum3DDiameter', 'Maximum2DDiameterSlice', 
-        'Maximum2DDiameterColumn', 'Maximum2DDiameterRow', 'MajorAxisLength', 
-        'MinorAxisLength', 'LeastAxisLength', 'Elongation', 'Flatness'
-    ]
-    return feature_names
 
 
 def calculate_individual_lesion_volumes(mask_data, voxel_dims, unit='ml'):
