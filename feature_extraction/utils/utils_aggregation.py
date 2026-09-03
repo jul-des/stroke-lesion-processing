@@ -69,6 +69,8 @@ def aggregate_lesion_features(
         # ── Basic flag ────────────────────────────────────────────────────────
         row["is_single_lesion"] = int(n == 1)
         row["n_lesions"]        = n
+        if has_missing_total_volume:
+            row["n_lesions"] = 0
 
         # ── User-specified aggregations ───────────────────────────────────────
         for col in mean_columns:
