@@ -13,6 +13,7 @@ add mansucript
 - [Downloading template and atlases](#downloading-template-and-atlases)
 - [Running Pipeline](#running-pipeline)
 - [Extracting Features](#extracting-features)
+- [3D Lesion-visualization](#3d-lesion-visualization)
 - [Citing this and underlying works](#citing-this-and-underlying-works)
 - [Questions](#questions)
 
@@ -62,6 +63,20 @@ Finally, the pipeline calculates DICE scores for the overlap of FLAIR and DWI br
 
 Once the pipeline has been run, the stroke lesion masks can be used to extract features on stroke lesion shape and distribution using the extract_features notebook under the feature_extraction directory. Details can be found in the notebook.
 Depending on the feature extraction method used, you might receive per lesion features, with potentially multiple lesions per patient. To aggregate these per lesion features to the patient level you can use the aggregate_features notebook under the feature_extraction directory.
+
+## 3D lesion visualization
+
+The 3D visualization of stroke lesions presented in the manuscript was done using ParaView 6.2.0 (https://www.paraview.org/). After downloading ParaView, run the visualize_case.py script to visualize the lesions of one stroke patient, who has been processed by the pipeline by running:
+
+
+````console 
+python visualize_case.py patient_id "/path/to/image/root/directory" --png
+````
+patient_id should be the patient you would like to visualize and correspond to the name of the folder, where the patient's images are saved. The folder should contain a DWI image as well as a folder masks with binary lesion masks and lesion components as outputted by the pipeline.
+
+"/path/to/image/root/directory" should point to the directory in which the patient folder is saved. 
+
+The visualization script calculates 3D reconstructions of stroke lesions and smooths them before plotting them overlayed over the 3D reconstructed DWI image in native space. At the top of the script under Settings, some limited customizations can be performed. If the --png flag is used three images of the reconstruction (top view, side view, front view) are saved in the patient folder. If the --png flag is removed, the 3D reconstructions are opened in ParaView and you can further customize the visualizations. 
 
 ## Citing this and underlying works
 This pipeline builds on multiple preexisting tools. When using this pipeline please cite all of the below: 
