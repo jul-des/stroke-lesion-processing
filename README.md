@@ -13,7 +13,7 @@ add mansucript
 - [Downloading template and atlases](#downloading-template-and-atlases)
 - [Running Pipeline](#running-pipeline)
 - [Extracting Features](#extracting-features)
-- [3D Lesion-visualization](#3d-lesion-visualization)
+- [3D Lesion Visualization](#3d-lesion-visualization)
 - [Citing this and underlying works](#citing-this-and-underlying-works)
 - [Questions](#questions)
 
@@ -64,7 +64,7 @@ Finally, the pipeline calculates DICE scores for the overlap of FLAIR and DWI br
 Once the pipeline has been run, the stroke lesion masks can be used to extract features on stroke lesion shape and distribution using the extract_features notebook under the feature_extraction directory. Details can be found in the notebook.
 Depending on the feature extraction method used, you might receive per lesion features, with potentially multiple lesions per patient. To aggregate these per lesion features to the patient level you can use the aggregate_features notebook under the feature_extraction directory.
 
-## 3D lesion visualization
+## 3D Lesion Visualization
 
 The 3D visualization of stroke lesions presented in the manuscript was done using ParaView 6.2.0 (https://www.paraview.org/). After downloading ParaView, run the visualize_case.py script to visualize the lesions of one stroke patient, who has been processed by the pipeline by running:
 
@@ -76,7 +76,7 @@ patient_id should be the patient you would like to visualize and correspond to t
 
 "/path/to/image/root/directory" should point to the directory in which the patient folder is saved. 
 
-The visualization script calculates 3D reconstructions of stroke lesions and smooths them before plotting them overlayed over the 3D reconstructed DWI image in native space. At the top of the script under Settings, some limited customizations can be performed. If the --png flag is used three images of the reconstruction (top view, side view, front view) are saved in the patient folder. If the --png flag is removed, the 3D reconstructions are opened in ParaView and you can further customize the visualizations. 
+The visualization script calculates 3D reconstructions of stroke lesions and smooths them before plotting them overlayed over the 3D reconstructed DWI image in native space. The color of each lesion is determined by its volume. At the top of the script under Settings, some limited customizations can be performed. If the --png flag is used three images of the reconstruction (top view, side view, front view) are saved in the patient folder. If the --png flag is removed, the 3D reconstructions are opened in ParaView and you can further customize the visualizations. 
 
 ## Citing this and underlying works
 This pipeline builds on multiple preexisting tools. When using this pipeline please cite all of the below: 
@@ -106,6 +106,13 @@ Schirmer, Markus D., et al. "Spatial signature of white matter hyperintensities 
 If you use the vascular territory atlas please cite:
 ```
 Liu, CF., Hsu, J., Xu, X. et al. Digital 3D Brain MRI Arterial Territories Atlas. Sci Data 10, 74 (2023). https://doi.org/10.1038/s41597-022-01923-0
+```
+
+3D Visualization
+```
+Ahrens, James, Geveci, Berk, Law, Charles, ParaView: An End-User Tool for Large Data Visualization, Visualization Handbook, Elsevier, 2005, ISBN-13: 9780123875822
+
+Ayachit, Utkarsh, The ParaView Guide: A Parallel Visualization Application, Kitware, 2015, ISBN 9781930934306
 ```
 
 
