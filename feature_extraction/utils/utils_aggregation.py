@@ -13,6 +13,34 @@ LEFT         = {"ACAL", "MCAL", "PCAL", "VBL"}
 RIGHT        = {"ACAR", "MCAR", "PCAR", "VBR"}
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def _parse_centroid(s):
+    """Parse '(x, y, z)' string → np.array([x, y, z])."""
+    s = str(s).strip().strip("()")
+    return np.array([float(v) for v in s.split(",")])
+
+
+def _minimum_enclosing_sphere(points):
+    """
+    Approximate minimum enclosing sphere via Ritter's algorithm.
+    Returns (centre, radius).
+    """
+    pts = np.array(points)
+    c = pts[0].copy()
+    r = 0.0
+    for p in pts[1:]:
+        d = np.linalg.norm(p - c)
+        if d > r:
+            r = (r + d) / 2.0
+            c = c + (p - c) * ((d - r) / d)
+    # One correction pass
+    for p in pts:
+        d = np.linalg.norm(p - c)
+        if d > r:
+            r = d
+    return c, r
+
+
 def _shannon_entropy(counts):
     """Shannon entropy from a dict or array of counts (zeros ignored)."""
     counts = np.array(list(counts), dtype=float)
@@ -29,7 +57,6 @@ def aggregate_lesion_features(
     mean_columns: list[str],
     mean_sd_columns: list[str],
     patient_col: str = "Patient ID",
-    total_volume_col: str = "Total Lesion Volume",
 ) -> pd.DataFrame:
     """
     Aggregate per-lesion rows into one row per patient with a rich feature set.
@@ -45,11 +72,6 @@ def aggregate_lesion_features(
         <col>_mean and <col>_sd).
     patient_col : str
         Column containing patient identifiers.
-    total_volume_col : str
-        Column holding the total lesion volume for each lesion row. If this
-        value is missing (NaN) for ANY lesion belonging to a patient, every
-        aggregated feature for that patient is set to NaN (only `patient_col`
-        is preserved).
 
     Returns
     -------
@@ -63,14 +85,9 @@ def aggregate_lesion_features(
         row = {patient_col: patient_id}
         n   = len(grp)
 
-        # ── Guard: any missing total lesion volume invalidates the patient ────
-        has_missing_total_volume = grp[total_volume_col].isna().any()
-
         # ── Basic flag ────────────────────────────────────────────────────────
         row["is_single_lesion"] = int(n == 1)
         row["n_lesions"]        = n
-        if has_missing_total_volume:
-            row["n_lesions"] = 0
 
         # ── User-specified aggregations ───────────────────────────────────────
         for col in mean_columns:
@@ -88,7 +105,7 @@ def aggregate_lesion_features(
 
         # ── Centroids ─────────────────────────────────────────────────────────
         centroids = grp[["centroid_x", "centroid_y", "centroid_z"]].values
-
+        centroids = np.asarray(centroids, dtype=float)
         # Volume-weighted centre of mass
         w = vols / (vols.sum() + 1e-9)
         com = (centroids * w[:, None]).sum(axis=0)
@@ -112,10 +129,17 @@ def aggregate_lesion_features(
         terr_col  = "region"
         territories_present = set(grp[terr_col].dropna().unique())
 
-        # One-hot per territory (count of lesions)
+        # Per-territory lesion counts and summed volumes
         terr_counts = grp[terr_col].value_counts()
+        terr_vols   = grp.groupby(terr_col)["Individual lesion volume"].sum()
         for t in TERRITORIES:
-            row[f"n_lesions_{t}"] = int(terr_counts.get(t, 0))
+            row[f"n_lesions_{t}"]   = int(terr_counts.get(t, 0))
+            row[f"vol_lesions_{t}"] = float(terr_vols.get(t, 0.0))
+        
+        # Territory with the largest summed lesion volume
+        terr_vols_known = terr_vols.reindex(TERRITORIES, fill_value=0.0)
+        row["main_territory"] = (terr_vols_known.idxmax()
+                                 if terr_vols_known.sum() > 0 else np.nan)
 
         row["n_territories"]           = len(territories_present)
         row["territory_entropy"]       = _shannon_entropy(
@@ -123,7 +147,6 @@ def aggregate_lesion_features(
         )
 
         # Volume entropy across territories
-        terr_vols = grp.groupby(terr_col)["Individual lesion volume"].sum()
         row["territory_volume_entropy"] = _shannon_entropy(
             [terr_vols.get(t, 0) for t in TERRITORIES]
         )
@@ -138,15 +161,12 @@ def aggregate_lesion_features(
             return (2 * np.sum((np.arange(1, n_t + 1)) * arr_s)
                     / (n_t * arr_s.sum()) - (n_t + 1) / n_t)
 
+
         # Hemisphere & circulation flags
         row["bilateral"]                  = int(bool(territories_present & LEFT)
                                                 and bool(territories_present & RIGHT))
         row["anterior_and_posterior"]     = int(bool(territories_present & ANTERIOR)
                                                 and bool(territories_present & POSTERIOR))
-
-        # ── Invalidate the row if any lesion is missing total lesion volume ────
-        if has_missing_total_volume:
-            row = {k: (v if k == patient_col else np.nan) for k, v in row.items()}
 
         records.append(row)
 
