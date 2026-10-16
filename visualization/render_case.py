@@ -17,6 +17,7 @@ vol_max = float(os.environ.get("VOL_MAX", "5.0"))
 log_volumes = os.environ.get("LOGARITHMIC_VOLUMES", "0") == "1"   # log or linear color scale
 zoom = float(os.environ.get("ZOOM", "1.4"))           # >1 makes the brain fill more of the PNG
 show_legend = os.environ.get("SHOW_LEGEND", "1") == "1"   # lesion volume color legend on/off
+brain_opacity = float(os.environ.get("BRAIN_OPACITY", "0.7"))  # scales the DWI opacity curve, 1.0 = as designed
 LoadDistributedPlugin('AnalyzeNIfTIReaderWriter', remote=False, ns=globals())
 
 # ----------------------------------------------------------------
@@ -108,7 +109,12 @@ nIfTIImageLUT.Set(
 # get opacity transfer function/opacity map for 'NIfTIImage'
 nIfTIImagePWF = GetOpacityTransferFunction('NIfTIImage')
 nIfTIImagePWF.Set(
-    Points=[0.0, 0.0, 0.5, 0.0, 63.88591384887695, 0.0, 0.5, 0.0, 117.50444793701172, 0.0580357164144516, 0.5, 0.0, 199.6434783935547, 0.0401785746216774, 0.5, 0.0, 640.0, 1.0, 0.5, 0.0],
+    # (value, opacity, midpoint, sharpness) per point; opacities scaled by brain_opacity
+    Points=[0.0, 0.0 * brain_opacity, 0.5, 0.0,
+            63.88591384887695, 0.0 * brain_opacity, 0.5, 0.0,
+            117.50444793701172, 0.0580357164144516 * brain_opacity, 0.5, 0.0,
+            199.6434783935547, 0.0401785746216774 * brain_opacity, 0.5, 0.0,
+            640.0, 1.0 * brain_opacity, 0.5, 0.0],
     ScalarRangeInitialized=1,
 )
 
@@ -316,3 +322,28 @@ if "OUT_PNG" in os.environ:
         GetActiveCamera().Dolly(zoom)      # move closer so the brain fills more of the image
         Render(renderView1)
         SaveScreenshot(f"{base}_{name}.png", renderView1, ImageResolution=[1600, 1200])
+
+# ----------------------------------------------------------------
+# Video export: one full turn around the vertical (S) axis,
+# starting from the front view; frames are saved as numbered PNGs
+# and joined into a video by run_case.py
+# ----------------------------------------------------------------
+if "OUT_VIDEO_FRAMES" in os.environ:
+    frames_dir = os.environ["OUT_VIDEO_FRAMES"]
+    n_frames = int(os.environ.get("VIDEO_FRAMES", "240"))
+    os.makedirs(frames_dir, exist_ok=True)
+    renderView1.OrientationAxesVisibility = 0
+
+    # Front view (from anterior, superior up), see the PNG views above
+    renderView1.CameraFocalPoint = [0, 0, 0]
+    renderView1.CameraPosition = [0, 1, 0]
+    renderView1.CameraViewUp = [0, 0, 1]
+    renderView1.ResetCamera()
+    camera = GetActiveCamera()
+    camera.Dolly(zoom)
+
+    for i in range(n_frames):
+        Render(renderView1)
+        SaveScreenshot(os.path.join(frames_dir, f"frame_{i:04d}.png"), renderView1,
+                       ImageResolution=[1600, 1200])
+        camera.Azimuth(360.0 / n_frames)   # rotate around the view-up (S) axis

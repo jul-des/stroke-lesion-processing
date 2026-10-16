@@ -78,6 +78,19 @@ patient_id should be the patient you would like to visualize and correspond to t
 
 The visualization script calculates 3D reconstructions of stroke lesions and smooths them before plotting them overlayed over the 3D reconstructed DWI image in native space. The color of each lesion is determined by its volume. At the top of the script under Settings, some limited customizations can be performed. If the --png flag is used three images of the reconstruction (top view, side view, front view) are saved in the patient folder. If the --png flag is removed, the 3D reconstructions are opened in ParaView and you can further customize the visualizations. 
 
+To generate videos of the 3D renderings as shown in the supplement of the manuscript you will have to install imageio-ffmpeg.
+
+````console 
+pip install imageio-ffmpeg
+````
+Then you can generate the videos using:
+
+````console 
+python visualize_case.py patient_id "/path/to/image/root/directory" --video
+````
+You can adjust frame rate and video length at the top of the visualize_case.py script.
+
+
 ## Citing this and underlying works
 This pipeline builds on multiple preexisting tools. When using this pipeline please cite all of the below: 
 
